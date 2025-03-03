@@ -8,42 +8,66 @@ import {
 import { assertEquals } from 'https://deno.land/std@0.90.0/testing/asserts.ts';
 
 Clarinet.test({
-  name: "Driver registration test",
+  name: "Registration tests",
   async fn(chain: Chain, accounts: Map<string, Account>) {
     const wallet1 = accounts.get('wallet_1')!;
+    const wallet2 = accounts.get('wallet_2')!;
     
+    // Test passenger registration
     let block = chain.mineBlock([
-      Tx.contractCall('quantum-ride', 'register-driver', 
+      Tx.contractCall('quantum-ride', 'register-passenger', 
         [
           types.principal(wallet1.address),
-          types.ascii("John Doe"),
-          types.ascii("ABC123")
+          types.ascii("John Passenger"),
         ],
         wallet1.address
       )
     ]);
-    
     block.receipts[0].result.expectOk();
     
-    const response = chain.callReadOnlyFn(
-      'quantum-ride',
-      'get-driver-info',
-      [types.principal(wallet1.address)],
-      wallet1.address
-    );
+    // Test driver registration
+    block = chain.mineBlock([
+      Tx.contractCall('quantum-ride', 'register-driver', 
+        [
+          types.principal(wallet2.address),
+          types.ascii("John Driver"),
+          types.ascii("ABC123")
+        ],
+        wallet2.address
+      )
+    ]);
+    block.receipts[0].result.expectOk();
     
-    response.result.expectOk().expectSome();
+    // Test duplicate registration
+    block = chain.mineBlock([
+      Tx.contractCall('quantum-ride', 'register-driver', 
+        [
+          types.principal(wallet2.address),
+          types.ascii("John Driver"),
+          types.ascii("ABC123")
+        ],
+        wallet2.address
+      )
+    ]);
+    block.receipts[0].result.expectErr(types.uint(103));
   }
 });
 
 Clarinet.test({
-  name: "Ride request lifecycle test",
+  name: "Complete ride lifecycle test",
   async fn(chain: Chain, accounts: Map<string, Account>) {
     const passenger = accounts.get('wallet_1')!;
     const driver = accounts.get('wallet_2')!;
     
-    // Register driver
+    // Register both parties
     let block = chain.mineBlock([
+      Tx.contractCall('quantum-ride', 'register-passenger',
+        [
+          types.principal(passenger.address),
+          types.ascii("John Passenger")
+        ],
+        passenger.address
+      ),
       Tx.contractCall('quantum-ride', 'register-driver',
         [
           types.principal(driver.address),
@@ -79,7 +103,6 @@ Clarinet.test({
         driver.address
       )
     ]);
-    
     block.receipts[0].result.expectOk();
     
     // Complete ride
@@ -89,7 +112,15 @@ Clarinet.test({
         driver.address
       )
     ]);
-    
     block.receipts[0].result.expectOk();
+    
+    // Verify ride counts updated
+    const driverInfo = chain.callReadOnlyFn(
+      'quantum-ride',
+      'get-driver-info',
+      [types.principal(driver.address)],
+      driver.address
+    );
+    driverInfo.result.expectOk().expectSome().get("total-rides").expectUint(1);
   }
 });
